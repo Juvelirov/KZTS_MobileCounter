@@ -2,7 +2,6 @@ import 'dart:ui';
 import 'package:ultralytics_yolo/ultralytics_yolo.dart';
 
 // Внутреннее состояние точки между кадрами.
-// Вынесено из CameraScreen, чтобы не засорять стейт виджета.
 class _Dot {
   double centerX;
   double centerY;
@@ -16,7 +15,6 @@ class _Dot {
 }
 
 class CountingTracker {
-  // Настройки алгоритма. Вынесены сюда, так как относятся только к математике.
   static const double lineFraction = 0.35;
   static const double matchRadius = 150.0;
   static const double hysteresisBand = 35.0;

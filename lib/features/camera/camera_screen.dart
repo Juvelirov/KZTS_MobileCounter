@@ -35,7 +35,6 @@ class _CameraScreenState extends State<CameraScreen> {
   static const double _minZoom = 1.0;
   static const double _maxZoom = 10.0;
 
-  // Трекер для подсчета. Вся математика инкапсулирована в нем.
   final _tracker = CountingTracker();
 
   // Состояния экрана
@@ -134,9 +133,7 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
-  // Главный коллбэк от YOLO. Вызывается на каждый обработанный кадр.
   void _onResults(List<YOLOResult> results) {
-    // Однократно применяем сохраненный зум при первом кадре
     if (!_zoomApplied) {
       _zoomApplied = true;
       try {
@@ -152,14 +149,12 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
 
-    // Фильтруем по порогу уверенности
     final filtered = results
         .where((r) => r.confidence >= _minConfidence)
         .toList();
 
     _tickFps();
 
-    // Отдаем точки трекеру. Он вернет количество новых пересечений линии.
     if (_viewSize.width > 0) {
       final crossedCount = _tracker.processResults(filtered, _viewSize);
       if (crossedCount > 0) {
@@ -173,7 +168,7 @@ class _CameraScreenState extends State<CameraScreen> {
   void _onCameraReady() {
     setState(() {
       _cameraReady = true;
-      _tracker.reset(); // Сбрасываем старые точки при старте
+      _tracker.reset(); 
       _countNotifier.value = 0;
       _frameTimestamps.clear();
       _fpsNotifier.value = 0.0;
@@ -324,7 +319,6 @@ class _CameraScreenState extends State<CameraScreen> {
                       builder: (context, constraints) {
                         final size = Size(
                             constraints.maxWidth, constraints.maxHeight);
-                        // Слушаем изменения размера вьюпорта (например, при повороте экрана)
                         if (_viewSize != size) {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (mounted) setState(() => _viewSize = size);

@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // Слой работы с локальной историей подсчетов.
-// Сохраняем в SharedPreferences, сериализуем в JSON.
 class HistoryStorage {
   static const _key = 'history_records';
 
