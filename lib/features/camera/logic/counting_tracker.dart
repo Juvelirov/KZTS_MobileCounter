@@ -15,7 +15,7 @@ class _Dot {
 }
 
 class CountingTracker {
-  static const double lineFraction = 0.35;
+  static const double lineFraction = 0.66;
   static const double matchRadius = 150.0;
   static const double hysteresisBand = 35.0;
 
@@ -74,8 +74,8 @@ class CountingTracker {
         usedPrevIdx.add(bestIdx);
         final prevWasOnRight = _prevDots[bestIdx].wasOnRight;
         
-        // Фиксация пересечения справа налево
-        if (prevWasOnRight && !nowOnRight) {
+        // Фиксация пересечения слева направо
+        if (!prevWasOnRight && nowOnRight) {
           newCrossings++;
         }
       }

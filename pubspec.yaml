@@ -10,18 +10,14 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # Плагин Ultralytics YOLO для распознавания
   ultralytics_yolo: ^0.6.13
-  # Камера и работа с изображениями
   camera: ^0.11.0
   image: ^4.1.0
-  # Разрешения и пути к файлам
   permission_handler: ^11.3.1
   path_provider: ^2.1.6
-  # Блокировка экрана во время работы
   wakelock_plus: ^1.8.0
-  # Локальное хранилище для истории и настроек (ОБЯЗАТЕЛЬНО для работы)
   shared_preferences: ^2.2.3
+  gal: ^2.3.0
 
 dev_dependencies:
   flutter_test:
@@ -32,7 +28,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/models/new_weights_32.tflite
     - assets/models/rezec_road_2210_640px.tflite
     - assets/logo.png
 
@@ -44,4 +39,3 @@ flutter_launcher_icons:
   ios: true
   image_path: "assets/logo.png"
   min_sdk_android: 21
-
