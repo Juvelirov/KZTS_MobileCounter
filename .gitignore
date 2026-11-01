@@ -47,7 +47,6 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-.dart_tool/
 build/
 android/.gradle/
 android/local.properties
