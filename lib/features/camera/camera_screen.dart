@@ -26,7 +26,8 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen> {
+// Добавляем WidgetsBindingObserver для отслеживания сворачивания/закрытия приложения
+class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver {
   static const double _lineWidth = 3.0;
   static const double _minConfidence = 0.6;
   static const int _skipFrames = 5;
@@ -72,19 +73,37 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // Подписываемся на события жизни
     _controller = YOLOViewController();
     _init();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // Отписываемся
     WakelockPlus.disable();
     _captureTimer?.cancel();
+    
+    // Сохраняем, если уходим с экрана с несохраненным счетчиком
+    if (!_detectionStopped && _countNotifier.value > 0) {
+      SettingsStorage.setUnsavedCount(_countNotifier.value);
+    }
+
     _countNotifier.dispose();
     _trackedNotifier.dispose();
     _zoomNotifier.dispose();
     _fpsNotifier.dispose();
     super.dispose();
+  }
+
+  // Отслеживаем, когда приложение уходит в фон или закрывается
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      if (!_detectionStopped && _countNotifier.value > 0) {
+        SettingsStorage.setUnsavedCount(_countNotifier.value);
+      }
+    }
   }
 
   Future<void> _init() async {
@@ -161,9 +180,9 @@ class _CameraScreenState extends State<CameraScreen> {
       await _captureAndSaveFrame();
       _capturedFrames++;
 
-      // Если сделали 6 кадров, останавливаемся
-      if (_capturedFrames >= 6) {
-        debugPrint('Авто-захват: собрано 6 кадров. Завершаем.');
+      // Если сделали 10 кадров, останавливаемся
+      if (_capturedFrames >= 10) {
+        debugPrint('Авто-захват: собрано 10 кадров. Завершаем.');
         timer.cancel();
         _isCapturing = false;
         _autoCaptureDisabled = true;
@@ -221,6 +240,9 @@ class _CameraScreenState extends State<CameraScreen> {
       if (crossedCount > 0) {
         _countNotifier.value += crossedCount;
         
+        // Сразу сохраняем счетчик на случай вылета приложения
+        SettingsStorage.setUnsavedCount(_countNotifier.value);
+        
         // При каждом +1 обновляем время последней детекции
         _lastDetectionTime = DateTime.now();
         
@@ -248,6 +270,9 @@ class _CameraScreenState extends State<CameraScreen> {
       _capturedFrames = 0;
       _captureTimer?.cancel();
     });
+    
+    // Так как началась новая сессия, старые несохраненные данные сбрасываем
+    SettingsStorage.clearUnsavedSession(); 
   }
 
   Future<void> _saveAndStop() async {
@@ -271,6 +296,7 @@ class _CameraScreenState extends State<CameraScreen> {
     if (!mounted) return;
     
     _captureTimer?.cancel(); // Отключаем захват при сохранении
+    await SettingsStorage.clearUnsavedSession(); // Данные сохранены, фоновую копию чистим
     
     setState(() {
       _savedCount = count;

@@ -1,19 +1,69 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
-// Пути к экранам обновлены под новую структуру папок
+import '../../data/history_storage.dart';
+import '../../data/settings_storage.dart';
 import '../camera/camera_screen.dart';
 import '../history/history_screen.dart';
 import '../settings/settings_screen.dart';
 
-class MainMenuScreen extends StatelessWidget {
+class MainMenuScreen extends StatefulWidget {
   const MainMenuScreen({super.key});
+
+  @override
+  State<MainMenuScreen> createState() => _MainMenuScreenState();
+}
+
+class _MainMenuScreenState extends State<MainMenuScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Проверяем наличие несохраненных данных после отрисовки первого кадра
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkUnsavedSession());
+  }
+
+  Future<void> _checkUnsavedSession() async {
+    final session = await SettingsStorage.getUnsavedSession();
+    if (session == null) return;
+
+    final int count = session['count'];
+    final DateTime time = session['time'];
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Несохраненные данные'),
+        content: Text(
+          'В прошлой сессии было насчитано $count изделий, но результат не был сохранен. Сохранить его в историю?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await SettingsStorage.clearUnsavedSession();
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Удалить', style: TextStyle(color: Colors.redAccent)),
+          ),
+          TextButton(
+            onPressed: () async {
+              await HistoryStorage.add(time, count);
+              await SettingsStorage.clearUnsavedSession();
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
-          // Градиент оставил оригинальный
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
@@ -34,9 +84,7 @@ class MainMenuScreen extends StatelessWidget {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (_) => const SettingsScreen(),
-                        ),
+                        MaterialPageRoute(builder: (_) => const SettingsScreen()),
                       );
                     },
                     child: Container(
@@ -53,17 +101,13 @@ class MainMenuScreen extends StatelessWidget {
                           ),
                         ],
                       ),
-                      child: const Icon(
-                        Icons.settings_rounded,
-                        color: AppColors.blue,
-                        size: 26,
-                      ),
+                      child: const Icon(Icons.settings_rounded, color: AppColors.blue, size: 26),
                     ),
                   ),
                 ),
               ),
 
-              // Основное содержимое экрана
+              // Основное содержимое
               Center(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -89,11 +133,7 @@ class MainMenuScreen extends StatelessWidget {
                             ),
                           ],
                         ),
-                        child: Image.asset(
-                          'assets/logo.png',
-                          width: 160,
-                          height: 160,
-                        ),
+                        child: Image.asset('assets/logo.png', width: 160, height: 160),
                       ),
                       const SizedBox(height: 36),
                       const Text(
@@ -128,70 +168,43 @@ class MainMenuScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 48),
-
-                      // Кнопка Старт
                       ElevatedButton.icon(
                         onPressed: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(
-                                builder: (_) => const CameraScreen()),
+                            MaterialPageRoute(builder: (_) => const CameraScreen()),
                           );
                         },
                         icon: const Icon(Icons.play_arrow_rounded, size: 28),
                         label: const Text('Старт'),
                         style: ElevatedButton.styleFrom(
                           minimumSize: const Size(240, 62),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 52,
-                            vertical: 18,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 52, vertical: 18),
                           backgroundColor: AppColors.blue,
                           foregroundColor: Colors.white,
                           elevation: 8,
                           shadowColor: AppColors.blue.withOpacity(0.5),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          textStyle: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.5,
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          textStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600, letterSpacing: 0.5),
                         ),
                       ),
                       const SizedBox(height: 14),
-
-                      // Кнопка История
                       OutlinedButton.icon(
                         onPressed: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(
-                                builder: (_) => const HistoryScreen()),
+                            MaterialPageRoute(builder: (_) => const HistoryScreen()),
                           );
                         },
                         icon: const Icon(Icons.history_rounded, size: 24),
                         label: const Text('История'),
                         style: OutlinedButton.styleFrom(
                           minimumSize: const Size(240, 56),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 40,
-                            vertical: 14,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
                           foregroundColor: AppColors.blue,
-                          side: const BorderSide(
-                            color: AppColors.blue,
-                            width: 2,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          textStyle: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.4,
-                          ),
+                          side: const BorderSide(color: AppColors.blue, width: 2),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: 0.4),
                         ),
                       ),
                     ],
