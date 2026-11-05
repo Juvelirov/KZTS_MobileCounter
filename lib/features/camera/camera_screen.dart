@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart';
+import 'package:flutter_tts/flutter_tts.dart'; // Пакет для озвучки
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:ultralytics_yolo/ultralytics_yolo.dart' hide ZoomIndicator;
@@ -26,8 +27,9 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
-// Добавляем WidgetsBindingObserver для отслеживания сворачивания/закрытия приложения
 class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver {
+  static const MethodChannel _recordChannel = MethodChannel('com.example.yolo_tracker_app_5x/screen_recorder');
+
   static const double _lineWidth = 3.0;
   static const double _minConfidence = 0.6;
   static const int _skipFrames = 5;
@@ -46,6 +48,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   int _savedCount = 0;
 
   late final YOLOViewController _controller;
+  late final FlutterTts _flutterTts; // Объект для синтеза речи
 
   bool _permissionGranted = false;
   String? _modelPath;
@@ -57,13 +60,22 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   static const int _fpsWindow = 30;
   DateTime _lastFpsUpdate = DateTime.now();
 
-  // --- ПЕРЕМЕННЫЕ ДЛЯ АВТО-ЗАХВАТА КАДРОВ ---
+  // --- ПЕРЕМЕННЫЕ ЗАПИСИ ЭКРАНА ---
+  bool _isRecording = false;
+  Timer? _screenRecordTimer;
+  // ---------------------------------
+
+  // --- ПЕРЕМЕННЫЕ АВТО-ЗАХВАТА КАДРОВ ---
   bool _isCapturing = false;
   bool _autoCaptureDisabled = false;
   int _capturedFrames = 0;
   Timer? _captureTimer;
   DateTime _lastDetectionTime = DateTime.now();
-  // ------------------------------------------
+  // -------------------------------------
+
+  // --- ПЕРЕМЕННАЯ ДЛЯ ОЗВУЧКИ ---
+  Timer? _ttsTimer;
+  // ------------------------------
 
   final _countNotifier = ValueNotifier<int>(0);
   final _trackedNotifier = ValueNotifier<List<YOLOResult>>([]);
@@ -73,18 +85,37 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this); // Подписываемся на события жизни
+    WidgetsBinding.instance.addObserver(this);
     _controller = YOLOViewController();
+    
+    // Инициализация TTS
+    _flutterTts = FlutterTts();
+    _initTts();
+
     _init();
+  }
+
+  Future<void> _initTts() async {
+    await _flutterTts.setLanguage("ru-RU");
+    await _flutterTts.setSpeechRate(0.5);
+    await _flutterTts.setVolume(1.0);
+    await _flutterTts.setPitch(1.0);
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this); // Отписываемся
+    WidgetsBinding.instance.removeObserver(this);
     WakelockPlus.disable();
     _captureTimer?.cancel();
+    _screenRecordTimer?.cancel();
+    _ttsTimer?.cancel(); // Отменяем таймер озвучки
+    _flutterTts.stop();  // Останавливаем речь при выходе
     
-    // Сохраняем, если уходим с экрана с несохраненным счетчиком
+    if (_isRecording) {
+      _recordChannel.invokeMethod('stopRecording');
+    }
+    _recordChannel.invokeMethod('stopProjection');
+
     if (!_detectionStopped && _countNotifier.value > 0) {
       SettingsStorage.setUnsavedCount(_countNotifier.value);
     }
@@ -96,7 +127,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     super.dispose();
   }
 
-  // Отслеживаем, когда приложение уходит в фон или закрывается
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
@@ -155,6 +185,41 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
   }
 
+  // --- ЛОГИКА ЗАПИСИ ЭКРАНА ---
+  Future<void> _startScreenRecording() async {
+    if (_isRecording) return;
+    try {
+      await _recordChannel.invokeMethod('startRecording');
+      setState(() => _isRecording = true);
+      debugPrint('Запись экрана запущена');
+    } catch (e) {
+      debugPrint('ОШИБКА ЗАПУСКА ЗАПИСИ: $e');
+    }
+  }
+
+  Future<void> _stopScreenRecording() async {
+    if (!_isRecording) return;
+    _screenRecordTimer?.cancel();
+    try {
+      await _recordChannel.invokeMethod('stopRecording');
+      setState(() => _isRecording = false);
+      debugPrint('Запись экрана остановлена');
+    } catch (e) {
+      debugPrint('ОШИБКА ОСТАНОВКИ ЗАПИСИ: $e');
+    }
+  }
+
+  void _resetScreenRecordTimer() {
+    _screenRecordTimer?.cancel();
+    _screenRecordTimer = Timer(const Duration(seconds: 180), () {
+      if (_isRecording) {
+        debugPrint('Таймаут 3 минуты без инкрементов. Останавливаем запись.');
+        _stopScreenRecording();
+      }
+    });
+  }
+  // -------------------------------------
+
   // --- ЛОГИКА АВТО-ЗАХВАТА КАДРОВ ---
   void _triggerAutoCapture() {
     if (_isCapturing || _autoCaptureDisabled) return;
@@ -162,15 +227,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     _isCapturing = true;
     _capturedFrames = 0;
 
-    // Делаем первый кадр сразу
     _captureAndSaveFrame();
     _capturedFrames++;
 
-    // Запускаем таймер на каждые 30 секунд
     _captureTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
-      // Если прошло 2 минуты без новых детекций (+1), выключаем функцию
       if (DateTime.now().difference(_lastDetectionTime).inMinutes >= 2) {
-        debugPrint('Авто-захват: простой > 2 мин. Отключаем.');
         timer.cancel();
         _isCapturing = false;
         _autoCaptureDisabled = true;
@@ -180,9 +241,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       await _captureAndSaveFrame();
       _capturedFrames++;
 
-      // Если сделали 10 кадров, останавливаемся
       if (_capturedFrames >= 10) {
-        debugPrint('Авто-захват: собрано 10 кадров. Завершаем.');
         timer.cancel();
         _isCapturing = false;
         _autoCaptureDisabled = true;
@@ -196,7 +255,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         await Gal.requestAccess();
       }
 
-      // Чистый кадр без оверлеев
       final Uint8List? photoBytes = await _controller.capturePhoto(withOverlays: false);
 
       if (photoBytes != null) {
@@ -205,14 +263,12 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
           name: 'yolo_capture_${DateTime.now().millisecondsSinceEpoch}',
         );
         debugPrint('Чистый кадр сохранен в галерею!');
-      } else {
-        debugPrint('Не удалось получить кадр (capturePhoto вернул null)');
       }
     } catch (e) {
       debugPrint('Ошибка сохранения кадра: $e');
     }
   }
-  // ------------------------------------------
+  // -------------------------------------
 
   void _onResults(List<YOLOResult> results) {
     if (!_zoomApplied) {
@@ -239,14 +295,14 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       
       if (crossedCount > 0) {
         _countNotifier.value += crossedCount;
-        
-        // Сразу сохраняем счетчик на случай вылета приложения
         SettingsStorage.setUnsavedCount(_countNotifier.value);
-        
-        // При каждом +1 обновляем время последней детекции
         _lastDetectionTime = DateTime.now();
         
-        // Если захват еще не начат и не отключен, запускаем
+        if (!_isRecording) {
+          _startScreenRecording();
+        }
+        _resetScreenRecordTimer();
+        
         if (!_isCapturing && !_autoCaptureDisabled) {
           _triggerAutoCapture();
         }
@@ -256,7 +312,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     _trackedNotifier.value = filtered;
   }
 
-  void _onCameraReady() {
+  void _onCameraReady() async {
     setState(() {
       _cameraReady = true;
       _tracker.reset();
@@ -264,15 +320,49 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       _frameTimestamps.clear();
       _fpsNotifier.value = 0.0;
       
-      // Сбрасываем флаги захвата при новом запуске
       _isCapturing = false;
       _autoCaptureDisabled = false;
       _capturedFrames = 0;
       _captureTimer?.cancel();
     });
     
-    // Так как началась новая сессия, старые несохраненные данные сбрасываем
-    SettingsStorage.clearUnsavedSession(); 
+    SettingsStorage.clearUnsavedSession();
+
+    // Таймер на озвучку через 10 секунд
+    _ttsTimer?.cancel();
+    _ttsTimer = Timer(const Duration(seconds: 10), () {
+      if (mounted && _cameraReady && !_detectionStopped) {
+        _flutterTts.speak('Режим подсчета изделий активирован. Не перекрывайте видимость камеры!');
+      }
+    });
+
+    // Показываем инструкцию ПЕРЕД системным запросом
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Внимание'),
+        content: const Text(
+          'Сейчас появится системное окно запроса разрешения на запись экрана.\n\n'
+          'Пожалуйста, нажмите «Начать», чтобы приложение могло вести запись конвейера.',
+          style: TextStyle(fontSize: 16),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Понятно', style: TextStyle(fontSize: 16)),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return;
+    try {
+      await _recordChannel.invokeMethod('requestPermission');
+      debugPrint('Запрошено разрешение на запись экрана');
+    } catch (e) {
+      debugPrint('Ошибка запроса разрешения: $e');
+    }
   }
 
   Future<void> _saveAndStop() async {
@@ -295,9 +385,15 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
     if (!mounted) return;
     
-    _captureTimer?.cancel(); // Отключаем захват при сохранении
-    await SettingsStorage.clearUnsavedSession(); // Данные сохранены, фоновую копию чистим
+    _captureTimer?.cancel();
+    _screenRecordTimer?.cancel();
+    _ttsTimer?.cancel(); // Отменяем озвучку, если сохранили до 10 секунд
+    _flutterTts.stop();
+    await SettingsStorage.clearUnsavedSession();
     
+    await _stopScreenRecording();
+    await _recordChannel.invokeMethod('stopProjection');
+
     setState(() {
       _savedCount = count;
       _detectionStopped = true;

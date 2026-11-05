@@ -16,7 +16,7 @@ android {
     defaultConfig {
         applicationId = "com.example.yolo_refactor_0411"
         minSdk = flutter.minSdkVersion
-        targetSdk = 34
+        targetSdk = 33
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
