@@ -14,7 +14,6 @@ class MainActivity: FlutterActivity() {
     private val CHANNEL = "com.example.yolo_tracker_app_5x/screen_recorder"
     private val REQUEST_CODE = 1001
 
-    // Companion object сохраняет данные даже если Activity пересоздастся
     companion object {
         private var staticResultCode: Int = -1
         private var staticData: Intent? = null
@@ -28,7 +27,6 @@ class MainActivity: FlutterActivity() {
             when (call.method) {
                 "requestPermission" -> {
                     if (staticIsPermissionGranted && staticData != null) {
-                        // Разрешение уже есть, НЕ показываем окно
                         result.success(true)
                     } else {
                         val projectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager

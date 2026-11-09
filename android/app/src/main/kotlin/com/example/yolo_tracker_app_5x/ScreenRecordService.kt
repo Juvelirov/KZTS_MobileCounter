@@ -4,8 +4,10 @@ import android.app.*
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.media.ImageReader
 import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -17,6 +19,7 @@ import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.util.DisplayMetrics
 import android.util.Log
+import android.view.Surface
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import java.io.File
@@ -30,6 +33,10 @@ class ScreenRecordService : Service() {
     private var mediaRecorder: MediaRecorder? = null
     private var currentVideoUri: Uri? = null
     private var pfd: ParcelFileDescriptor? = null
+    
+    // Фоновый приемник для удержания сессии живой
+    private var backgroundImageReader: ImageReader? = null
+    private var backgroundSurface: Surface? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -53,6 +60,7 @@ class ScreenRecordService : Service() {
                         mediaProjection = projectionManager.getMediaProjection(resultCode, data)
                         mediaProjection?.registerCallback(object : MediaProjection.Callback() {
                             override fun onStop() {
+                                Log.e("ScreenRecordService", "Система принудительно остановила проекцию!")
                                 stopRecordingInternal()
                                 cleanup()
                                 stopSelf()
@@ -63,6 +71,10 @@ class ScreenRecordService : Service() {
                         stopSelf()
                         return START_NOT_STICKY
                     }
+                }
+                
+                if (virtualDisplay == null) {
+                    initVirtualDisplay()
                 }
                 
                 if (mediaRecorder == null) {
@@ -80,7 +92,7 @@ class ScreenRecordService : Service() {
         return START_STICKY
     }
 
-    private fun startRecordingInternal() {
+    private fun initVirtualDisplay() {
         val metrics = DisplayMetrics()
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         wm.defaultDisplay.getRealMetrics(metrics)
@@ -88,6 +100,32 @@ class ScreenRecordService : Service() {
         val width = 640
         val height = 480
         val density = metrics.densityDpi
+
+        // Создаем фоновый ImageReader, который будет "съедать" кадры, чтобы система видела активность
+        backgroundImageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+        backgroundImageReader?.setOnImageAvailableListener({ reader ->
+            val image = reader.acquireLatestImage()
+            image?.close() // Сразу закрываем, чтобы не забивать память
+        }, null)
+        
+        backgroundSurface = backgroundImageReader?.surface
+
+        virtualDisplay = mediaProjection?.createVirtualDisplay(
+            "ScreenRecord",
+            width, height, density,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            backgroundSurface, null, null
+        )
+        Log.d("ScreenRecordService", "VirtualDisplay создан с фоновым Surface")
+    }
+
+    private fun startRecordingInternal() {
+        val metrics = DisplayMetrics()
+        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        wm.defaultDisplay.getRealMetrics(metrics)
+        
+        val width = 640
+        val height = 480
         
         val dateFormat = SimpleDateFormat("ddMMyyyy", Locale.US)
         val dateStr = dateFormat.format(Date())
@@ -136,18 +174,8 @@ class ScreenRecordService : Service() {
                 }
             }
 
-            // Если VirtualDisplay еще не создан - создаем. Если создан - просто привязываем новый Surface.
-            if (virtualDisplay == null) {
-                virtualDisplay = mediaProjection?.createVirtualDisplay(
-                    "ScreenRecord",
-                    width, height, density,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    mediaRecorder?.surface, null, null
-                )
-            } else {
-                virtualDisplay?.setSurface(mediaRecorder?.surface)
-            }
-
+            // Переключаем VirtualDisplay на записывающий Surface
+            virtualDisplay?.setSurface(mediaRecorder?.surface)
             mediaRecorder?.start()
             Log.d("ScreenRecordService", "Запись запущена: $dirStr/$fileName")
         } catch (e: Exception) {
@@ -168,10 +196,8 @@ class ScreenRecordService : Service() {
             mediaRecorder = null
         }
         
-        // ВАЖНО: Мы НЕ удаляем virtualDisplay (не вызываем release), 
-        // чтобы система не аннулировала разрешение на запись.
-        // Просто отвязываем поверхность, чтобы остановить захват кадров.
-        virtualDisplay?.setSurface(null)
+        // Возвращаем VirtualDisplay на фоновый Surface, чтобы токен не умер
+        virtualDisplay?.setSurface(backgroundSurface)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && currentVideoUri != null) {
             val contentValues = ContentValues().apply {
@@ -184,12 +210,16 @@ class ScreenRecordService : Service() {
         try { pfd?.close() } catch (e: Exception) {}
         pfd = null
         
-        Log.d("ScreenRecordService", "Запись остановлена (файл сохранен, VirtualDisplay жив)")
+        Log.d("ScreenRecordService", "Запись остановлена (сессия сохранена в фоне)")
     }
 
     private fun cleanup() {
         virtualDisplay?.release()
         virtualDisplay = null
+        backgroundSurface?.release()
+        backgroundSurface = null
+        backgroundImageReader?.close()
+        backgroundImageReader = null
         mediaProjection?.stop()
         mediaProjection = null
     }

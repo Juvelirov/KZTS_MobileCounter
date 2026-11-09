@@ -15,7 +15,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0,
   ];
 
-  double _selectedZoom = 6.0;
+  double _selectedZoom = 5.0;
   bool _loading = true;
 
   @override

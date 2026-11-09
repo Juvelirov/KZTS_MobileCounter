@@ -12,7 +12,7 @@ class SettingsStorage {
 
   static Future<double> getInitialZoom() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getDouble(_keyInitialZoom) ?? 6.0;
+    return prefs.getDouble(_keyInitialZoom) ?? 5.0;
   }
 
   // --- Логика несохраненной сессии ---

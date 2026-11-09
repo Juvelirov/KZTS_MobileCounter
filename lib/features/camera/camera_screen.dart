@@ -31,11 +31,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   static const MethodChannel _recordChannel = MethodChannel('com.example.yolo_tracker_app_5x/screen_recorder');
 
   static const double _lineWidth = 3.0;
-  static const double _minConfidence = 0.6;
+  static const double _minConfidence = 0.45;
   static const int _skipFrames = 5;
 
-  double _initialZoom = 6.0;
-  double _baseZoom = 6.0;
+  double _initialZoom = 5.0;
+  double _baseZoom = 5.0;
   static const double _minZoom = 1.0;
   static const double _maxZoom = 10.0;
 
@@ -79,7 +79,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   final _countNotifier = ValueNotifier<int>(0);
   final _trackedNotifier = ValueNotifier<List<YOLOResult>>([]);
-  final _zoomNotifier = ValueNotifier<double>(6.0);
+  final _zoomNotifier = ValueNotifier<double>(5.0);
   final _fpsNotifier = ValueNotifier<double>(0.0);
 
   @override
@@ -196,6 +196,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       debugPrint('ОШИБКА ЗАПУСКА ЗАПИСИ: $e');
     }
   }
+  
 
   Future<void> _stopScreenRecording() async {
     if (!_isRecording) return;
