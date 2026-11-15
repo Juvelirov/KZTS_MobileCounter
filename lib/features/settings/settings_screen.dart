@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle, AssetManifest;
 import '../../core/theme/app_theme.dart';
 import '../../data/settings_storage.dart';
 
@@ -17,6 +18,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   double _selectedZoom = 5.0;
   bool _loading = true;
+  List<String> _availableModels = [];
 
   @override
   void initState() {
@@ -26,11 +28,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final zoom = await SettingsStorage.getInitialZoom();
+    final models = await _findModelAssets();
+    
     if (!mounted) return;
     setState(() {
       _selectedZoom = zoom;
+      _availableModels = models;
       _loading = false;
     });
+  }
+
+  // Динамический поиск всех .tflite файлов в assets
+  Future<List<String>> _findModelAssets() async {
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      return manifest.listAssets()
+          .where((path) => path.endsWith('.tflite'))
+          .map((path) => path.split('/').last) // Оставляем только имя файла
+          .toList();
+    } catch (e) {
+      debugPrint('Ошибка чтения AssetManifest: $e');
+      return [];
+    }
   }
 
   Future<void> _save() async {
@@ -62,11 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 padding: EdgeInsets.all(16),
                 child: Text(
                   'Начальное приближение',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.blueDark,
-                  ),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.blueDark),
                 ),
               ),
               const Divider(height: 1),
@@ -142,7 +157,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Установка начального приближения', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textDark)),
+                  // --- Блок 1: Зум ---
+                  const Text(
+                    'Установка начального приближения',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textDark),
+                  ),
                   const SizedBox(height: 10),
                   Material(
                     color: Colors.transparent,
@@ -155,13 +174,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(color: AppColors.blue.withOpacity(0.35), width: 1.5),
-                          boxShadow: [BoxShadow(color: AppColors.blue.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 4))],
+                          boxShadow: [
+                            BoxShadow(color: AppColors.blue.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 4)),
+                          ],
                         ),
                         child: Row(
                           children: [
                             const Icon(Icons.zoom_in_rounded, color: AppColors.blue, size: 24),
                             const SizedBox(width: 14),
-                            Expanded(child: Text('${_selectedZoom.toStringAsFixed(1)}x', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textDark))),
+                            Expanded(
+                              child: Text(
+                                '${_selectedZoom.toStringAsFixed(1)}x',
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textDark),
+                              ),
+                            ),
                             const Icon(Icons.arrow_drop_down_rounded, color: AppColors.blue, size: 28),
                           ],
                         ),
@@ -170,7 +196,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   const Text('Значение применяется при запуске камеры', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  
+                  const SizedBox(height: 24),
+
+                  // --- Блок 2: Системная информация (Модели в assets) ---
+                  const Text(
+                    'Системная информация',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textDark),
+                  ),
+                  const SizedBox(height: 10),
+                  
+                  if (_availableModels.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.grey.shade300, width: 1.5),
+                      ),
+                      child: const Text(
+                        'Модели .tflite не найдены в assets',
+                        style: TextStyle(fontSize: 14, color: Colors.grey),
+                      ),
+                    )
+                  else
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.grey.shade300, width: 1.5),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.memory_rounded, color: Colors.grey, size: 24),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Модели в assets:',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                                ),
+                                const SizedBox(height: 4),
+                                ..._availableModels.map((model) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: Text(
+                                    model,
+                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textDark),
+                                  ),
+                                )),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
                   const Spacer(),
+
+                  // --- Кнопка сохранения ---
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(

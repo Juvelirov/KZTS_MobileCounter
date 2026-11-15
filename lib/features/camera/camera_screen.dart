@@ -30,7 +30,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   static const MethodChannel _recordChannel = MethodChannel('com.example.yolo_tracker_app_5x/screen_recorder');
 
   static const double _lineWidth = 3.0;
-  static const double _minConfidence = 0.5; 
+  static const double _minConfidence = 0.55; 
   static const int _skipFrames = 5;
 
   double _initialZoom = 5.0;
