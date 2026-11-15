@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_tts/flutter_tts.dart'; // Пакет для озвучки
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:ultralytics_yolo/ultralytics_yolo.dart' hide ZoomIndicator;
@@ -31,24 +30,20 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   static const MethodChannel _recordChannel = MethodChannel('com.example.yolo_tracker_app_5x/screen_recorder');
 
   static const double _lineWidth = 3.0;
-  static const double _minConfidence = 0.45;
+  static const double _minConfidence = 0.5; 
   static const int _skipFrames = 5;
 
   double _initialZoom = 5.0;
-  double _baseZoom = 5.0;
-  static const double _minZoom = 1.0;
-  static const double _maxZoom = 10.0;
+  bool _zoomApplied = false;
 
   final _tracker = CountingTracker();
 
   bool _cameraReady = false;
   bool _detectionStopped = false;
   bool _counterFullscreen = false;
-  bool _zoomApplied = false;
   int _savedCount = 0;
 
   late final YOLOViewController _controller;
-  late final FlutterTts _flutterTts; // Объект для синтеза речи
 
   bool _permissionGranted = false;
   String? _modelPath;
@@ -60,26 +55,17 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   static const int _fpsWindow = 30;
   DateTime _lastFpsUpdate = DateTime.now();
 
-  // --- ПЕРЕМЕННЫЕ ЗАПИСИ ЭКРАНА ---
   bool _isRecording = false;
   Timer? _screenRecordTimer;
-  // ---------------------------------
 
-  // --- ПЕРЕМЕННЫЕ АВТО-ЗАХВАТА КАДРОВ ---
   bool _isCapturing = false;
   bool _autoCaptureDisabled = false;
   int _capturedFrames = 0;
   Timer? _captureTimer;
   DateTime _lastDetectionTime = DateTime.now();
-  // -------------------------------------
-
-  // --- ПЕРЕМЕННАЯ ДЛЯ ОЗВУЧКИ ---
-  Timer? _ttsTimer;
-  // ------------------------------
 
   final _countNotifier = ValueNotifier<int>(0);
   final _trackedNotifier = ValueNotifier<List<YOLOResult>>([]);
-  final _zoomNotifier = ValueNotifier<double>(5.0);
   final _fpsNotifier = ValueNotifier<double>(0.0);
 
   @override
@@ -87,19 +73,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _controller = YOLOViewController();
-    
-    // Инициализация TTS
-    _flutterTts = FlutterTts();
-    _initTts();
-
     _init();
-  }
-
-  Future<void> _initTts() async {
-    await _flutterTts.setLanguage("ru-RU");
-    await _flutterTts.setSpeechRate(0.5);
-    await _flutterTts.setVolume(1.0);
-    await _flutterTts.setPitch(1.0);
   }
 
   @override
@@ -108,8 +82,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     WakelockPlus.disable();
     _captureTimer?.cancel();
     _screenRecordTimer?.cancel();
-    _ttsTimer?.cancel(); // Отменяем таймер озвучки
-    _flutterTts.stop();  // Останавливаем речь при выходе
     
     if (_isRecording) {
       _recordChannel.invokeMethod('stopRecording');
@@ -122,7 +94,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
     _countNotifier.dispose();
     _trackedNotifier.dispose();
-    _zoomNotifier.dispose();
     _fpsNotifier.dispose();
     super.dispose();
   }
@@ -147,6 +118,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
     try {
       setState(() => _status = 'Копирование модели...');
+      
+      // ВАЖНО: Проверь название модели, если менял
       final byteData = await rootBundle.load('assets/models/rezec_road_2210_640px.tflite');
       final tempDir = await getTemporaryDirectory();
       final file = File('${tempDir.path}/rezec_road_2210_640px.tflite');
@@ -159,8 +132,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         _permissionGranted = true;
         _status = 'Готово';
         _initialZoom = savedZoom;
-        _baseZoom = savedZoom;
-        _zoomNotifier.value = savedZoom;
       });
     } catch (e) {
       setState(() => _status = 'Ошибка: $e');
@@ -196,7 +167,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       debugPrint('ОШИБКА ЗАПУСКА ЗАПИСИ: $e');
     }
   }
-  
 
   Future<void> _stopScreenRecording() async {
     if (!_isRecording) return;
@@ -272,11 +242,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   // -------------------------------------
 
   void _onResults(List<YOLOResult> results) {
+    // Применяем зум ОДИН раз при первом кадре (из настроек) и больше не трогаем
     if (!_zoomApplied) {
       _zoomApplied = true;
       try {
         _controller.setZoomLevel(_initialZoom);
-        _zoomNotifier.value = _initialZoom;
       } catch (_) {
         _zoomApplied = false;
       }
@@ -313,7 +283,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     _trackedNotifier.value = filtered;
   }
 
-  void _onCameraReady() async {
+    void _onCameraReady() async {
     setState(() {
       _cameraReady = true;
       _tracker.reset();
@@ -329,35 +299,28 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     
     SettingsStorage.clearUnsavedSession();
 
-    // Таймер на озвучку через 10 секунд
-    _ttsTimer?.cancel();
-    _ttsTimer = Timer(const Duration(seconds: 10), () {
-      if (mounted && _cameraReady && !_detectionStopped) {
-        _flutterTts.speak('Режим подсчета изделий активирован. Не перекрывайте видимость камеры!');
-      }
-    });
-
     // Показываем инструкцию ПЕРЕД системным запросом
     await showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: false, // Запрещаем закрывать окно кликом мимо
       builder: (ctx) => AlertDialog(
         title: const Text('Внимание'),
         content: const Text(
-          'Сейчас появится системное окно запроса разрешения на запись экрана.\n\n'
-          'Пожалуйста, нажмите «Начать», чтобы приложение могло вести запись конвейера.',
+          'Сейчас появится окно запроса разрешения на запись экрана.\n\n'
+          'Нажмите НАЧАТЬ, чтобы приложение могло вести запись экрана!!!',
           style: TextStyle(fontSize: 16),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Понятно', style: TextStyle(fontSize: 16)),
+            child: const Text('ПОНЯТНО', style: TextStyle(fontSize: 16)),
           ),
         ],
       ),
     );
 
     if (!mounted) return;
+
     try {
       await _recordChannel.invokeMethod('requestPermission');
       debugPrint('Запрошено разрешение на запись экрана');
@@ -388,8 +351,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     
     _captureTimer?.cancel();
     _screenRecordTimer?.cancel();
-    _ttsTimer?.cancel(); // Отменяем озвучку, если сохранили до 10 секунд
-    _flutterTts.stop();
     await SettingsStorage.clearUnsavedSession();
     
     await _stopScreenRecording();
@@ -408,29 +369,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   void _toggleFullscreenCounter() {
     setState(() => _counterFullscreen = !_counterFullscreen);
-  }
-
-  void _onScaleStart(ScaleStartDetails details) {
-    _baseZoom = _zoomNotifier.value;
-  }
-
-  void _onScaleUpdate(ScaleUpdateDetails details) {
-    if (_detectionStopped || _counterFullscreen) return;
-    final newZoom = (_baseZoom * details.scale).clamp(_minZoom, _maxZoom);
-    _controller.setZoomLevel(newZoom);
-    _zoomNotifier.value = newZoom;
-  }
-
-  void _zoomIn() {
-    final newZoom = (_zoomNotifier.value + 0.5).clamp(_minZoom, _maxZoom);
-    _controller.setZoomLevel(newZoom);
-    _zoomNotifier.value = newZoom;
-  }
-
-  void _zoomOut() {
-    final newZoom = (_zoomNotifier.value - 0.5).clamp(_minZoom, _maxZoom);
-    _controller.setZoomLevel(newZoom);
-    _zoomNotifier.value = newZoom;
   }
 
   @override
@@ -497,39 +435,17 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                         }
                         return Stack(
                           children: [
-                            GestureDetector(
-                              onScaleStart: _onScaleStart,
-                              onScaleUpdate: _onScaleUpdate,
-                              child: YOLOView(
-                                modelPath: _modelPath!,
-                                controller: _controller,
-                                useGpu: true,
-                                cameraResolution: '480p',
-                                streamingConfig: YOLOStreamingConfig(skipFrames: _skipFrames),
-                                onResult: _onResults,
-                              ),
+                            // Камера без GestureDetector
+                            YOLOView(
+                              modelPath: _modelPath!,
+                              controller: _controller,
+                              useGpu: true,
+                              cameraResolution: '480p',
+                              streamingConfig: YOLOStreamingConfig(skipFrames: _skipFrames),
+                              onResult: _onResults,
                             ),
+                            
                             if (!_cameraReady) ...[
-                              Positioned(
-                                top: 16, left: 16,
-                                child: ValueListenableBuilder<double>(
-                                  valueListenable: _zoomNotifier,
-                                  builder: (context, zoom, _) => ZoomIndicator(zoom: zoom),
-                                ),
-                              ),
-                              Positioned(
-                                right: 16, top: 0, bottom: 0,
-                                child: Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      ZoomButton(icon: Icons.add, onPressed: _zoomIn),
-                                      const SizedBox(height: 10),
-                                      ZoomButton(icon: Icons.remove, onPressed: _zoomOut),
-                                    ],
-                                  ),
-                                ),
-                              ),
                               SetupOverlay(onReady: _onCameraReady),
                             ],
                             if (_cameraReady) ...[
@@ -559,13 +475,13 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                                   builder: (context, fps, _) => FpsBadge(fps: fps),
                                 ),
                               ),
+                              
+                              // ВОЗВРАЩАЕМ ИНДИКАТОР ЗУМА (статичный)
                               Positioned(
                                 top: 60, left: 16,
-                                child: ValueListenableBuilder<double>(
-                                  valueListenable: _zoomNotifier,
-                                  builder: (context, zoom, _) => ZoomIndicator(zoom: zoom),
-                                ),
+                                child: ZoomIndicator(zoom: _initialZoom),
                               ),
+                              
                               Positioned(
                                 bottom: 24, left: 16, right: 16,
                                 child: Row(
@@ -580,16 +496,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                                     ),
                                     const SizedBox(width: 10),
                                     Expanded(child: CounterScreenButton(onTap: _toggleFullscreenCounter)),
-                                  ],
-                                ),
-                              ),
-                              Positioned(
-                                bottom: 150, right: 16,
-                                child: Column(
-                                  children: [
-                                    ZoomButton(icon: Icons.add, onPressed: _zoomIn),
-                                    const SizedBox(height: 8),
-                                    ZoomButton(icon: Icons.remove, onPressed: _zoomOut),
                                   ],
                                 ),
                               ),

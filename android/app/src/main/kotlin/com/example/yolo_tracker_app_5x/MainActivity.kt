@@ -44,8 +44,6 @@ class MainActivity: FlutterActivity() {
                     if (staticIsPermissionGranted && staticData != null) {
                         val serviceIntent = Intent(this, ScreenRecordService::class.java).apply {
                             action = "START"
-                            putExtra("resultCode", staticResultCode)
-                            putExtra("data", staticData)
                         }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             startForegroundService(serviceIntent)
@@ -84,6 +82,18 @@ class MainActivity: FlutterActivity() {
             staticResultCode = resultCode
             staticData = data
             staticIsPermissionGranted = true
+
+            // СРАЗУ запускаем сервис в фоновом режиме, чтобы использовать токен
+            val serviceIntent = Intent(this, ScreenRecordService::class.java).apply {
+                action = "INIT"
+                putExtra("resultCode", resultCode)
+                putExtra("data", data)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
         }
     }
 }

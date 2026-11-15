@@ -34,7 +34,6 @@ class ScreenRecordService : Service() {
     private var currentVideoUri: Uri? = null
     private var pfd: ParcelFileDescriptor? = null
     
-    // Фоновый приемник для удержания сессии живой
     private var backgroundImageReader: ImageReader? = null
     private var backgroundSurface: Surface? = null
 
@@ -42,41 +41,37 @@ class ScreenRecordService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        if (action == "START") {
+        
+        if (action == "INIT") {
             val resultCode = intent.getIntExtra("resultCode", -1)
             val data = intent.getParcelableExtra<Intent>("data")
-            
             if (data != null) {
-                val notification = createNotification()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-                } else {
-                    startForeground(1, notification)
-                }
-
+                startForegroundNotification()
                 if (mediaProjection == null) {
                     val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                     try {
                         mediaProjection = projectionManager.getMediaProjection(resultCode, data)
                         mediaProjection?.registerCallback(object : MediaProjection.Callback() {
                             override fun onStop() {
-                                Log.e("ScreenRecordService", "Система принудительно остановила проекцию!")
+                                Log.e("ScreenRecordService", "Система остановила проекцию!")
                                 stopRecordingInternal()
                                 cleanup()
                                 stopSelf()
                             }
                         }, null)
                     } catch (e: Exception) {
-                        Log.e("ScreenRecordService", "Ошибка получения проекции: ${e.message}")
+                        Log.e("ScreenRecordService", "INIT failed: ${e.message}")
                         stopSelf()
                         return START_NOT_STICKY
                     }
                 }
-                
                 if (virtualDisplay == null) {
                     initVirtualDisplay()
                 }
-                
+            }
+        } else if (action == "START") {
+            if (mediaProjection != null && virtualDisplay != null) {
+                startForegroundNotification()
                 if (mediaRecorder == null) {
                     startRecordingInternal()
                 }
@@ -92,6 +87,15 @@ class ScreenRecordService : Service() {
         return START_STICKY
     }
 
+    private fun startForegroundNotification() {
+        val notification = createNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        } else {
+            startForeground(1, notification)
+        }
+    }
+
     private fun initVirtualDisplay() {
         val metrics = DisplayMetrics()
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -101,11 +105,10 @@ class ScreenRecordService : Service() {
         val height = 480
         val density = metrics.densityDpi
 
-        // Создаем фоновый ImageReader, который будет "съедать" кадры, чтобы система видела активность
         backgroundImageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         backgroundImageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage()
-            image?.close() // Сразу закрываем, чтобы не забивать память
+            image?.close()
         }, null)
         
         backgroundSurface = backgroundImageReader?.surface
@@ -133,6 +136,13 @@ class ScreenRecordService : Service() {
         val fileName = "yolo_record_${System.currentTimeMillis()}.mp4"
 
         try {
+            mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(this)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val resolver = contentResolver
                 val contentValues = ContentValues().apply {
@@ -144,7 +154,7 @@ class ScreenRecordService : Service() {
                 val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                 currentVideoUri = resolver.insert(collection, contentValues)
 
-                mediaRecorder = MediaRecorder(this).apply {
+                mediaRecorder?.apply {
                     setVideoSource(MediaRecorder.VideoSource.SURFACE)
                     setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                     setVideoEncoder(MediaRecorder.VideoEncoder.H264)
@@ -162,7 +172,7 @@ class ScreenRecordService : Service() {
                 if (!dir.exists()) dir.mkdirs()
                 val file = File(dir, fileName)
                 
-                mediaRecorder = MediaRecorder().apply {
+                mediaRecorder?.apply {
                     setVideoSource(MediaRecorder.VideoSource.SURFACE)
                     setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                     setVideoEncoder(MediaRecorder.VideoEncoder.H264)
@@ -174,7 +184,6 @@ class ScreenRecordService : Service() {
                 }
             }
 
-            // Переключаем VirtualDisplay на записывающий Surface
             virtualDisplay?.setSurface(mediaRecorder?.surface)
             mediaRecorder?.start()
             Log.d("ScreenRecordService", "Запись запущена: $dirStr/$fileName")
@@ -196,7 +205,6 @@ class ScreenRecordService : Service() {
             mediaRecorder = null
         }
         
-        // Возвращаем VirtualDisplay на фоновый Surface, чтобы токен не умер
         virtualDisplay?.setSurface(backgroundSurface)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && currentVideoUri != null) {
@@ -210,7 +218,7 @@ class ScreenRecordService : Service() {
         try { pfd?.close() } catch (e: Exception) {}
         pfd = null
         
-        Log.d("ScreenRecordService", "Запись остановлена (сессия сохранена в фоне)")
+        Log.d("ScreenRecordService", "Запись остановлена")
     }
 
     private fun cleanup() {
@@ -240,7 +248,7 @@ class ScreenRecordService : Service() {
         }
         return NotificationCompat.Builder(this, channelId)
             .setContentTitle("Счетчик изделий")
-            .setContentText("Идет запись экрана...")
+            .setContentText("Приложение готово к записи...")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .build()
     }
